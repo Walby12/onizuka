@@ -4,6 +4,7 @@ open System.IO
 type TokenType =
     | Ident of string
     | Interger of int
+    | Col
     | EOF
 
 type TopLevel = {
@@ -37,6 +38,9 @@ let rec tokenize (tl: TopLevel) =
         | c when Char.IsWhiteSpace(c) ->
             tl.Index <- tl.Index + 1
             tokenize tl
+        | ',' ->
+            tl.Index <- tl.Index + 1
+            tl.Token <- Col
         | c when Char.IsDigit(c) ->
             let mutable buff = ""
             while tl.Index < tl.Src.Length && Char.IsDigit(tl.Src[tl.Index]) && not (Char.IsWhiteSpace(tl.Src[tl.Index])) do
@@ -56,6 +60,24 @@ let rec tokenize (tl: TopLevel) =
             exit 1
     else
         tl.Token <- EOF
+
+let expectTok (tl: TopLevel) (t: TokenType) =
+    tokenize tl
+    if not (tl.Token = t) then
+        printfn "ERROR at line %d: Expected %+A but got %+A" tl.Line t tl.Token
+        exit 1
+
+let expectIdent (tl: TopLevel) =
+    tokenize tl
+    match tl.Token with
+    | Ident n -> n
+    | other -> 
+        printfn "ERROR line %d: Expected Ident, got %A" tl.Line other
+        exit 1
+
+let parseMov (tl: TopLevel) =
+    let n = expectIdent tl
+    printfn "FOUND %s" n
         
 let rec parse (tl: TopLevel) =
     tokenize tl
@@ -64,12 +86,12 @@ let rec parse (tl: TopLevel) =
         printfn "FINISHED"
     | Ident op ->
         match op with
-        | "mov" -> printfn "NICE mov"
+        | "mov" -> parseMov tl
         | _ ->
             printfn "ERROR at line %d: Unknow op '%s'" tl.Line op
     | Interger i ->
-        printfn "Found standalone integer: %d" i
-        parse tl
+        printfn "TODO INTEGER"
+        exit 1
 
 [<EntryPoint>]
 let main _ =
