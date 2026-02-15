@@ -1,4 +1,16 @@
-﻿open System.IO
+﻿open System
+open System.IO
+
+type TokenType =
+    | Ident of string
+    | Interger of int
+
+type TopLevel = {
+    Src: string
+    mutable Index: int
+    mutable Line: int
+    mutable Tokens: ResizeArray<TokenType>
+}
 
 let readFile (path: string) =
     try
@@ -12,53 +24,50 @@ let readFile (path: string) =
         printfn "An error occurred: %s" err.Message
         None
 
-type OpCode =
-    | Mov of int * int
-    | Add of int * int * int 
-    | Dump of int
-    | Halt
+let rec tokenize (tl: TopLevel) =
+    if tl.Index < tl.Src.Length then
+        let c = tl.Src[tl.Index]
 
-type VM = {
-    mutable Regs: int[]
-    mutable PC: int
-    mutable Running: bool
-}
-
-type TopLevel = {
-    Src: string[]
-    mutable Index: int
-    mutable Line: int
-}
-
-let rec build_ast (tl: TopLevel) =
-    for line in tl.Src do
-        let tokens = line.Split([| ' '; '\t' |], System.StringSplitOptions.RemoveEmptyEntries)
-
-        for inst in tokens do
-            match inst with
-            | "Hello" -> printfn "Hello Back"
-            | _ ->
-                printfn "ERROR at line %d: Unknow op '%s'" tl.Line inst
-                exit 1
-        tl.Line <- tl.Line + 1  
-
-let step (vm: VM) (instr: OpCode) =
-    match instr with
-    | Mov (r, num) -> vm.Regs[r] <- num
-    | Add (r1, r2, r3) -> vm.Regs[r1] <- vm.Regs[r2] + vm.Regs[r3]
-    | Dump r -> printfn "%d" vm.Regs[r]
-    | Halt -> vm.Running <- false
-
+        match c with
+        | '\n' ->
+            tl.Line <- tl.Line + 1
+            tl.Index <- tl.Index + 1
+            tokenize tl
+        | c when Char.IsWhiteSpace(c) ->
+            tl.Index <- tl.Index + 1
+            tokenize tl
+        | c when Char.IsDigit(c) ->
+            let mutable buff = ""
+            while tl.Index < tl.Src.Length && Char.IsDigit(tl.Src[tl.Index]) && not (Char.IsWhiteSpace(tl.Src[tl.Index])) do
+                buff <- buff + (string tl.Src[tl.Index])
+                tl.Index <- tl.Index + 1
+                
+            tl.Tokens.Add(Interger (int buff))
+            tokenize tl
+        | c when Char.IsLetter(c) ->
+            let mutable buff = ""
+            while tl.Index < tl.Src.Length && Char.IsLetterOrDigit(tl.Src[tl.Index]) && not (Char.IsWhiteSpace(tl.Src[tl.Index])) do
+                buff <- buff + (string tl.Src[tl.Index])
+                tl.Index <- tl.Index + 1
+                
+            tl.Tokens.Add(Ident (buff))
+            tokenize tl
+        | _ ->
+            printfn "ERROR at line %d: Unknow char '%c'" tl.Line c
+            exit 1
+   
 [<EntryPoint>]
 let main _ =
     match readFile "test.on" with
     | Some res ->
         let tl = {
-            Src = res.Split([| "\r\n"; "\n" |], System.StringSplitOptions.None)
+            Src = res
             Index = 0
             Line = 1
+            Tokens = ResizeArray<TokenType>()
         }
-        build_ast tl
+        tokenize tl
+        printfn "Tokens: %+A" tl.Tokens
     | None -> exit 1
 
     0
