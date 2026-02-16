@@ -76,8 +76,10 @@ let expectIdent (tl: TopLevel) =
         exit 1
 
 let parseMov (tl: TopLevel) =
-    let n = expectIdent tl
-    printfn "FOUND %s" n
+    let r1 = expectIdent tl
+    expectTok tl Col
+    let r2 = expectIdent tl
+    printfn "r1: %s, r2: %s" r1 r2
         
 let rec parse (tl: TopLevel) =
     tokenize tl
