@@ -1,9 +1,11 @@
 ﻿open System
 open System.IO
 
+let registers = [|"r1"; "r2"; "r3"; "r4"; "r5"; "r6"; "r7"; "r8"|];
+
 type TokenType =
     | Ident of string
-    | Interger of int
+    | Integer of int
     | Col
     | EOF
 
@@ -12,6 +14,7 @@ type TopLevel = {
     mutable Index: int
     mutable Line: int
     mutable Token: TokenType
+    mutable Regs: int option[]
 }
 
 let readFile (path: string) =
@@ -47,7 +50,7 @@ let rec tokenize (tl: TopLevel) =
                 buff <- buff + (string tl.Src[tl.Index])
                 tl.Index <- tl.Index + 1
                 
-            tl.Token <- Interger (int buff)
+            tl.Token <- Integer (int buff)
         | c when Char.IsLetter(c) ->
             let mutable buff = ""
             while tl.Index < tl.Src.Length && Char.IsLetterOrDigit(tl.Src[tl.Index]) && not (Char.IsWhiteSpace(tl.Src[tl.Index])) do
@@ -72,29 +75,49 @@ let expectIdent (tl: TopLevel) =
     match tl.Token with
     | Ident n -> n
     | other -> 
-        printfn "ERROR line %d: Expected Ident, got %A" tl.Line other
+        printfn "ERROR at line %d: Expected Ident, got %A" tl.Line other
         exit 1
 
 let parseMov (tl: TopLevel) =
     let r1 = expectIdent tl
+    if not(Array.contains r1 registers) then
+        printfn "ERROR at line %d: Unknow register '%s'\nList of registers %+A" tl.Line r1 registers
+        exit 1
+
+    let indexRegLeft = int (Char.GetNumericValue(r1.[r1.Length - 1]))        
+    
     expectTok tl Col
-    let r2 = expectIdent tl
-    printfn "r1: %s, r2: %s" r1 r2
+    tokenize tl
+    match tl.Token with
+    | Ident r2 ->
+        if not(Array.contains r2 registers) then
+            printfn "ERROR at line %d: Unknow register '%s'\nList of registers %+A" tl.Line r1 registers
+            exit 1
+
+        let indexRegRight = int (Char.GetNumericValue(r2.[r2.Length - 1]))
+        tl.Regs[indexRegRight] <- tl.Regs[indexRegLeft]
+    | Integer n ->
+        tl.Regs[indexRegLeft] <- Some n
+    | _ ->
+        printfn "ERROR at line %d: Expected a number or a register but got: %+A" tl.Line tl.Token
+        exit 1
         
 let rec parse (tl: TopLevel) =
     tokenize tl
     match tl.Token with
     | EOF -> 
-        printfn "FINISHED"
+        printfn "Finished"
     | Ident op ->
         match op with
-        | "mov" -> parseMov tl
+        | "mov" ->
+            parseMov tl
+            parse tl
         | _ ->
             printfn "ERROR at line %d: Unknow op '%s'" tl.Line op
-    | Interger i ->
-        printfn "TODO INTEGER"
+            exit 1
+    | _ ->
+        printfn "ERROR at line %d: Unknow op '%+A'" tl.Line tl.Token
         exit 1
-
 [<EntryPoint>]
 let main _ =
     match readFile "test.on" with
@@ -104,6 +127,7 @@ let main _ =
             Index = 0
             Line = 1
             Token = Ident ("START")
+            Regs = Array.create registers.Length None
         }
         parse tl
     | None -> exit 1
