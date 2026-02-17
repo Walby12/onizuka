@@ -1,2 +1,2 @@
 mov r1, 12
-mov r2, r1
+dump r1

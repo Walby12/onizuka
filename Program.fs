@@ -95,13 +95,30 @@ let parseMov (tl: TopLevel) =
             exit 1
 
         let indexRegRight = int (Char.GetNumericValue(r2.[r2.Length - 1]))
-        tl.Regs[indexRegRight] <- tl.Regs[indexRegLeft]
+        match tl.Regs[indexRegRight] with
+        | Some _ -> tl.Regs[indexRegLeft] <- tl.Regs[indexRegRight]
+        | None ->
+            printfn "ERROR at line %d: Register %s is empty" tl.Line r2
+            exit 1
     | Integer n ->
         tl.Regs[indexRegLeft] <- Some n
     | _ ->
         printfn "ERROR at line %d: Expected a number or a register but got: %+A" tl.Line tl.Token
         exit 1
-        
+
+let parseDump (tl: TopLevel) =
+    let reg = expectIdent tl
+    if not(Array.contains reg registers) then
+        printfn "ERROR at line %d: Unknow register '%s'\nList of registers %+A" tl.Line reg registers
+        exit 1
+
+    let indexReg = int (Char.GetNumericValue(reg.[reg.Length - 1]))
+    match tl.Regs[indexReg] with
+    | Some n -> printfn "%d" n
+    | None ->
+        printfn "ERROR at line %d: Register %s is empty" tl.Line reg
+        exit 1
+    
 let rec parse (tl: TopLevel) =
     tokenize tl
     match tl.Token with
@@ -112,12 +129,16 @@ let rec parse (tl: TopLevel) =
         | "mov" ->
             parseMov tl
             parse tl
+        | "dump" ->
+            parseDump tl
+            parse tl
         | _ ->
             printfn "ERROR at line %d: Unknow op '%s'" tl.Line op
             exit 1
     | _ ->
         printfn "ERROR at line %d: Unknow op '%+A'" tl.Line tl.Token
         exit 1
+
 [<EntryPoint>]
 let main _ =
     match readFile "test.on" with
