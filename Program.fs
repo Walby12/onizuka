@@ -1,7 +1,7 @@
 ﻿open System
 open System.IO
 
-let registers = [|"r1"; "r2"; "r3"; "r4"; "r5"; "r6"; "r7"; "r8"|];
+let registers = [|"r1"; "r2"; "r3"; "r4"; "r5"; "r6"; "r7"; "r8"; "r9"; "r10"|];
 
 type TokenType =
     | Ident of string
@@ -78,13 +78,16 @@ let expectIdent (tl: TopLevel) =
         printfn "ERROR at line %d: Expected Ident, got %A" tl.Line other
         exit 1
 
+let getIdx (regName: string) =
+    int (regName.Substring(1)) - 1
+
 let parseMov (tl: TopLevel) =
     let r1 = expectIdent tl
     if not(Array.contains r1 registers) then
         printfn "ERROR at line %d: Unknow register '%s'\nList of registers %+A" tl.Line r1 registers
         exit 1
 
-    let indexRegLeft = int (Char.GetNumericValue(r1.[r1.Length - 1]))        
+    let indexRegLeft = getIdx r1        
     
     expectTok tl Col
     tokenize tl
@@ -94,7 +97,7 @@ let parseMov (tl: TopLevel) =
             printfn "ERROR at line %d: Unknow register '%s'\nList of registers %+A" tl.Line r1 registers
             exit 1
 
-        let indexRegRight = int (Char.GetNumericValue(r2.[r2.Length - 1]))
+        let indexRegRight = getIdx r2
         match tl.Regs[indexRegRight] with
         | Some _ -> tl.Regs[indexRegLeft] <- tl.Regs[indexRegRight]
         | None ->
@@ -112,7 +115,7 @@ let parseDump (tl: TopLevel) =
         printfn "ERROR at line %d: Unknow register '%s'\nList of registers %+A" tl.Line reg registers
         exit 1
 
-    let indexReg = int (Char.GetNumericValue(reg.[reg.Length - 1]))
+    let indexReg = getIdx reg
     match tl.Regs[indexReg] with
     | Some n -> printfn "%d" n
     | None ->
@@ -125,11 +128,46 @@ let parsePop (tl: TopLevel) =
         printfn "ERROR at line %d: Unknow register '%s'\nList of registers %+A" tl.Line reg registers
         exit 1
 
-    let indexReg = int (Char.GetNumericValue(reg.[reg.Length - 1]))
+    let indexReg = getIdx reg
     match tl.Regs[indexReg] with
     | Some _ -> tl.Regs[indexReg] <- None
     | None ->
         printfn "ERROR at line %d: Cannot pop register %s because it is already empty" tl.Line reg
+        exit 1
+
+let parseAdd (tl: TopLevel) =
+    let r1 = expectIdent tl
+    if not(Array.contains r1 registers) then
+        printfn "ERROR at line %d: Unknow register '%s'\nList of registers %+A" tl.Line r1 registers
+        exit 1
+
+    expectTok tl Col
+    
+    let indexRegLeft = getIdx r1
+    match tl.Regs[indexRegLeft] with
+    | Some n1 ->
+        tokenize tl
+        
+        match tl.Token with
+        | Ident r2 ->
+            if not(Array.contains r2 registers) then
+                printfn "ERROR at line %d: Unknow register '%s'\nList of registers %+A" tl.Line r2 registers
+                exit 1
+
+            let indexRegRight = getIdx r2
+            match tl.Regs[indexRegRight] with
+            | Some n2 ->
+                tl.Regs[indexRegLeft] <- Some (n1 + n2) 
+            | None ->
+                printfn "ERROR at line %d: Cannot perform add on register %s because it is empty" tl.Line r2
+                exit 1
+        | Integer n ->
+            tl.Regs[indexRegLeft] <- Some (n1 + n)
+        | _ ->
+            printfn "ERROR at line %d: Excpected a number or a register but got %+A" tl.Line tl.Token
+            exit 1
+    | None ->
+        printfn "ERROR at line %d: Cannot perform add on register %s because it is empty" tl.Line r1
         exit 1
 
 let rec parse (tl: TopLevel) =
@@ -147,6 +185,9 @@ let rec parse (tl: TopLevel) =
             parse tl
         | "pop" ->
             parsePop tl
+            parse tl
+        | "add" ->
+            parseAdd tl
             parse tl
         | _ ->
             printfn "ERROR at line %d: Unknow op '%s'" tl.Line op
