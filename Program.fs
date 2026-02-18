@@ -118,7 +118,20 @@ let parseDump (tl: TopLevel) =
     | None ->
         printfn "ERROR at line %d: Register %s is empty" tl.Line reg
         exit 1
-    
+
+let parsePop (tl: TopLevel) =
+    let reg = expectIdent tl
+    if not(Array.contains reg registers) then
+        printfn "ERROR at line %d: Unknow register '%s'\nList of registers %+A" tl.Line reg registers
+        exit 1
+
+    let indexReg = int (Char.GetNumericValue(reg.[reg.Length - 1]))
+    match tl.Regs[indexReg] with
+    | Some _ -> tl.Regs[indexReg] <- None
+    | None ->
+        printfn "ERROR at line %d: Cannot pop register %s because it is already empty" tl.Line reg
+        exit 1
+
 let rec parse (tl: TopLevel) =
     tokenize tl
     match tl.Token with
@@ -131,6 +144,9 @@ let rec parse (tl: TopLevel) =
             parse tl
         | "dump" ->
             parseDump tl
+            parse tl
+        | "pop" ->
+            parsePop tl
             parse tl
         | _ ->
             printfn "ERROR at line %d: Unknow op '%s'" tl.Line op
