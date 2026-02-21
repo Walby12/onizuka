@@ -1,4 +1,4 @@
-mov r1, 34
-mov r10, 35
-add r1, r10
+mov r1, 70
+mov r10, 1
+sub r1, r10
 dump r1
