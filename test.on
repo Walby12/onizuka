@@ -1,5 +1,7 @@
-mov r1, 70
-mov r10, 1
-sub r1, r10
-cmp r1, 70
-dump r1
+mov r2, 0
+start:
+	mov r1, 10
+	cmp r1, r2
+	dump r2
+	add r2, 1
+	jnz r1, start

@@ -18,6 +18,7 @@ type TokenType =
     | Ident of string
     | Integer of int
     | Col
+    | Label of string
     | EOF
 
 type TopLevel = {
@@ -26,6 +27,7 @@ type TopLevel = {
     mutable Line: int
     mutable Token: TokenType
     mutable Regs: int option[]
+    mutable Labels: Map<string, int>
 }
 
 let readFile (path: string) =
@@ -67,13 +69,30 @@ let rec tokenize (tl: TopLevel) =
             while tl.Index < tl.Src.Length && Char.IsLetterOrDigit(tl.Src[tl.Index]) && not (Char.IsWhiteSpace(tl.Src[tl.Index])) do
                 buff <- buff + (string tl.Src[tl.Index])
                 tl.Index <- tl.Index + 1
-                
-            tl.Token <- Ident (buff)
+
+            if tl.Index < tl.Src.Length && tl.Src[tl.Index] = ':' then
+                tl.Index <- tl.Index + 1
+                tl.Token <- Label (buff)
+            else
+                tl.Token <- Ident (buff)
         | _ ->
             printfn "ERROR at line %d: Unknow char '%c'" tl.Line c
             exit 1
     else
         tl.Token <- EOF
+
+let collectLabels (tl: TopLevel) =
+    let rec scan () =
+        tokenize tl
+        match tl.Token with
+        | Label name -> 
+            tl.Labels <- tl.Labels.Add(name, tl.Index)
+            scan ()
+        | EOF -> 
+            tl.Index <- 0
+            tl.Line <- 1
+        | _ -> scan ()
+    scan ()
 
 let expectTok (tl: TopLevel) (t: TokenType) =
     tokenize tl
@@ -258,11 +277,64 @@ let parseCmp (tl: TopLevel) =
         exit 1
     
 
+
+let parseJz (tl: TopLevel) =
+    tokenize tl
+    let valueToCheck = 
+        match tl.Token with
+        | Ident reg -> 
+            let idx = getIdx reg
+            match tl.Regs.[idx] with
+            | Some n -> n
+            | None ->
+                printfn "ERROR at line %d: Cannot perfom jz with register '%s' because it is empty" tl.Line reg
+                exit 1
+        | Integer n -> n
+        | _ ->
+            printfn "ERROR at line %d: Expected a register or an integer but got: %+A" tl.Line tl.Token
+            exit 1
+
+    expectTok tl Col
+    let targetLabel = expectIdent tl
+    
+    if valueToCheck = 0 then
+        match tl.Labels.TryFind targetLabel with
+        | Some pos -> tl.Index <- pos
+        | None -> 
+            printfn "ERROR: Unknown label '%s'" targetLabel
+            exit 1
+
+let parseJnz (tl: TopLevel) =
+    tokenize tl
+    let valueToCheck = 
+        match tl.Token with
+        | Ident reg -> 
+            let idx = getIdx reg
+            match tl.Regs.[idx] with
+            | Some n -> n
+            | None ->
+                printfn "ERROR at line %d: Cannot perfom jnz with register '%s' because it is empty" tl.Line reg
+                exit 1
+        | Integer n -> n
+        | _ ->
+            printfn "ERROR at line %d: Expected a register or an integer but got: %+A" tl.Line tl.Token
+            exit 1
+
+    expectTok tl Col
+    let targetLabel = expectIdent tl
+    
+    if not(valueToCheck = 0) then
+        match tl.Labels.TryFind targetLabel with
+        | Some pos -> tl.Index <- pos
+        | None -> 
+            printfn "ERROR: Unknown label '%s'" targetLabel
+            exit 1
+
 let rec parse (tl: TopLevel) =
     tokenize tl
     match tl.Token with
-    | EOF -> 
-        ()
+    | EOF -> ()
+    | Label _ -> parse tl
     | Ident op ->
         match op with
         | "mov" ->
@@ -283,9 +355,14 @@ let rec parse (tl: TopLevel) =
         | "cmp" ->
             parseCmp tl
             parse tl
+        | "jz" ->
+            parseJz tl
+            parse tl
+        | "jnz" ->
+            parseJnz tl
+            parse tl
         | _ ->
-            printfn "ERROR at line %d: Unknow op '%s'" tl.Line op
-            exit 1
+            printfn "ERROR at line %d: Unknow instruction '%s'" tl.Line op
     | _ ->
         printfn "ERROR at line %d: Unexpected token: '%+A'" tl.Line tl.Token
         exit 1
@@ -315,7 +392,9 @@ let main argv =
                             Line = 1
                             Token = Ident ("START")
                             Regs = Array.create registers.Length None
+                            Labels = Map.empty
                         }
+                        collectLabels tl
                         parse tl
                         0
                     | None -> 1
