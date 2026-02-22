@@ -18,6 +18,7 @@ type TokenType =
     | Ident of string
     | Integer of int
     | Col
+    | DoubleCol
     | Label of string
     | EOF
 
@@ -28,6 +29,7 @@ type TopLevel = {
     mutable Token: TokenType
     mutable Regs: int option[]
     mutable Labels: Map<string, int>
+    mutable ReturnStack: int list
 }
 
 let readFile (path: string) =
@@ -57,6 +59,9 @@ let rec tokenize (tl: TopLevel) =
         | ',' ->
             tl.Index <- tl.Index + 1
             tl.Token <- Col
+        | ':' ->
+            tl.Index <- tl.Index + 1
+            tl.Token <- DoubleCol
         | c when Char.IsDigit(c) ->
             let mutable buff = ""
             while tl.Index < tl.Src.Length && Char.IsDigit(tl.Src[tl.Index]) && not (Char.IsWhiteSpace(tl.Src[tl.Index])) do
@@ -330,6 +335,49 @@ let parseJnz (tl: TopLevel) =
             printfn "ERROR: Unknown label '%s'" targetLabel
             exit 1
 
+let parseCall (tl: TopLevel) =
+    expectTok tl DoubleCol
+    let targetLabel = expectIdent tl
+
+    match tl.Labels.TryFind targetLabel with
+    | Some pos ->
+        tl.ReturnStack <- tl.Index :: tl.ReturnStack
+        tl.Index <- pos
+    | None ->
+        printfn "ERROR at line %d: Unknow label: '%s'" tl.Line targetLabel
+        exit 1
+
+let parseRet (tl: TopLevel) =
+    match tl.ReturnStack with
+    | [] ->
+        printfn "ERROR at line %d: Tried to return but the label was never called" tl.Line
+        exit 1
+    | head :: tail ->
+        tl.Index <- head
+        tl.ReturnStack <- tail
+
+let parseHalt (tl: TopLevel) =
+    tokenize tl
+
+    match tl.Token with
+    | Ident reg ->
+        if not(Array.contains reg registers) then
+            printfn "ERROR at line %d: Unknow register '%s'\nList of registers %+A" tl.Line reg registers
+            exit 1
+
+        let indexReg = getIdx reg
+        match tl.Regs[indexReg] with
+        | Some n ->
+            exit n
+        | None ->
+            printfn "ERROR at line %d: Cannot perform halt with register %s because it is empty" tl.Line reg
+            exit 1
+    | Integer n ->
+        exit n
+    | _ ->
+        printfn "ERROR at line %d: Expected a register or an integer but got %+A" tl.Line tl.Token
+        exit 1
+
 let rec parse (tl: TopLevel) =
     tokenize tl
     match tl.Token with
@@ -361,6 +409,14 @@ let rec parse (tl: TopLevel) =
         | "jnz" ->
             parseJnz tl
             parse tl
+        | "call" ->
+            parseCall tl
+            parse tl
+        | "ret" ->
+            parseRet tl
+            parse tl
+        | "halt" ->
+            parseHalt tl
         | _ ->
             printfn "ERROR at line %d: Unknow instruction '%s'" tl.Line op
     | _ ->
@@ -393,6 +449,7 @@ let main argv =
                             Token = Ident ("START")
                             Regs = Array.create registers.Length None
                             Labels = Map.empty
+                            ReturnStack = []
                         }
                         collectLabels tl
                         parse tl

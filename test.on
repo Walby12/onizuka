@@ -1,7 +1,11 @@
-mov r2, 0
-start:
-	mov r1, 10
-	cmp r1, r2
-	dump r2
-	add r2, 1
-	jnz r1, start
+mov r1, 10
+call :double
+dump r1        
+mov r1, 50
+call :double
+dump r1        
+halt 0
+
+double:
+  add r1, r1
+  ret
