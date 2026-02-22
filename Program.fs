@@ -216,6 +216,48 @@ let parseSub (tl: TopLevel) =
         printfn "ERROR at line %d: Cannot perform sub on register %s because it is empty" tl.Line r1
         exit 1
 
+let parseCmp (tl: TopLevel) =
+    let r1 = expectIdent tl
+    if not(Array.contains r1 registers) then
+        printfn "ERROR at line %d: Unknow register '%s'\nList of registers %+A" tl.Line r1 registers
+        exit 1
+
+    expectTok tl Col
+    
+    let indexRegLeft = getIdx r1
+    match tl.Regs[indexRegLeft] with
+    | Some n1 ->
+        tokenize tl
+        
+        match tl.Token with
+        | Ident r2 ->
+            if not(Array.contains r2 registers) then
+                printfn "ERROR at line %d: Unknow register '%s'\nList of registers %+A" tl.Line r2 registers
+                exit 1
+
+            let indexRegRight = getIdx r2
+            match tl.Regs[indexRegRight] with
+            | Some n2 ->
+                if n1 = n2 then
+                    tl.Regs[indexRegLeft] <- Some 0
+                else
+                    tl.Regs[indexRegLeft] <- Some 1 
+            | None ->
+                printfn "ERROR at line %d: Cannot perform cmp on register %s because it is empty" tl.Line r2
+                exit 1
+        | Integer n ->
+            if n1 = n then
+                tl.Regs[indexRegLeft] <- Some 0
+            else
+                 tl.Regs[indexRegLeft] <- Some 1
+        | _ ->
+            printfn "ERROR at line %d: Excpected a number or a register but got %+A" tl.Line tl.Token
+            exit 1
+    | None ->
+        printfn "ERROR at line %d: Cannot perform cmp on register %s because it is empty" tl.Line r1
+        exit 1
+    
+
 let rec parse (tl: TopLevel) =
     tokenize tl
     match tl.Token with
@@ -237,6 +279,9 @@ let rec parse (tl: TopLevel) =
             parse tl
         | "sub" ->
             parseSub tl
+            parse tl
+        | "cmp" ->
+            parseCmp tl
             parse tl
         | _ ->
             printfn "ERROR at line %d: Unknow op '%s'" tl.Line op
