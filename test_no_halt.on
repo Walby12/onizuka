@@ -1,0 +1,12 @@
+main:
+  mov r1, 10
+  call :double
+  dump r1
+  mov r1, 50
+  call :double
+  dump r1
+
+double:
+  add r1, r1
+  ret
+

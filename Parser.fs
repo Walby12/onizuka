@@ -28,7 +28,22 @@ module Parser =
         | Ret
         | Halt of HaltOperand
 
-    type ProgramAst = Instruction list
+    type ProgramAst = (Instruction * int) list
+
+    type Diagnostic =
+        {
+            Kind: string
+            Line: int
+            Message: string
+        }
+
+    type ProgramInfo =
+        {
+            Ast: ProgramAst
+            Labels: Map<string, int>
+            LabelLines: Map<string, int>
+            Diagnostics: Diagnostic list
+        }
 
     let registers = [|"r1"; "r2"; "r3"; "r4"; "r5"; "r6"; "r7"; "r8"; "r9"; "r10"|]
 
@@ -314,7 +329,10 @@ module Parser =
         Lexer.tokenize tl
         match tl.Token with
         | EOF -> ()
-        | Label _ -> parse tl
+        | Label _ ->
+            match tl.ReturnStack with
+            | [] -> ()
+            | _ -> parse tl
         | Ident op ->
             match op with
             | "mov" ->
@@ -355,7 +373,7 @@ module Parser =
             printfn "ERROR at line %d: Unexpected token: '%+A'" tl.Line tl.Token
             exit 1
 
-    let parseToAst (src: string) : ProgramAst =
+    let private parseToAstInternal (src: string) : ProgramAst * Map<string, int> * Map<string, int> =
         let tl = {
             Src = src
             Index = 0
@@ -366,7 +384,9 @@ module Parser =
             ReturnStack = []
         }
 
-        let instructions = System.Collections.Generic.List<Instruction>()
+        let instructions = System.Collections.Generic.List<Instruction * int>()
+        let mutable labels = Map.empty<string, int>
+        let mutable labelLines = Map.empty<string, int>
 
         let expectTokAst (t: TokenType) =
             Lexer.tokenize tl
@@ -407,61 +427,64 @@ module Parser =
             Lexer.tokenize tl
             match tl.Token with
             | EOF -> ()
-            | Label _ ->
+            | Label name ->
+                labels <- labels.Add(name, instructions.Count)
+                labelLines <- labelLines.Add(name, tl.Line)
                 parseLoop ()
             | Ident op ->
+                let line = tl.Line
                 match op with
                 | "mov" ->
                     let dst = expectRegisterAst ()
                     expectTokAst Col
                     let srcOp = parseOperandAst ()
-                    instructions.Add(Mov (dst, srcOp))
+                    instructions.Add(Mov (dst, srcOp), line)
                     parseLoop ()
                 | "dump" ->
                     let reg = expectRegisterAst ()
-                    instructions.Add(Dump reg)
+                    instructions.Add(Dump reg, line)
                     parseLoop ()
                 | "pop" ->
                     let reg = expectRegisterAst ()
-                    instructions.Add(Pop reg)
+                    instructions.Add(Pop reg, line)
                     parseLoop ()
                 | "add" ->
                     let dst = expectRegisterAst ()
                     expectTokAst Col
                     let opnd = parseOperandAst ()
-                    instructions.Add(Add (dst, opnd))
+                    instructions.Add(Add (dst, opnd), line)
                     parseLoop ()
                 | "sub" ->
                     let dst = expectRegisterAst ()
                     expectTokAst Col
                     let opnd = parseOperandAst ()
-                    instructions.Add(Sub (dst, opnd))
+                    instructions.Add(Sub (dst, opnd), line)
                     parseLoop ()
                 | "cmp" ->
                     let dst = expectRegisterAst ()
                     expectTokAst Col
                     let opnd = parseOperandAst ()
-                    instructions.Add(Cmp (dst, opnd))
+                    instructions.Add(Cmp (dst, opnd), line)
                     parseLoop ()
                 | "jz" ->
                     let cond = parseOperandAst ()
                     expectTokAst Col
                     let target = expectIdentAst ()
-                    instructions.Add(Jz (cond, target))
+                    instructions.Add(Jz (cond, target), line)
                     parseLoop ()
                 | "jnz" ->
                     let cond = parseOperandAst ()
                     expectTokAst Col
                     let target = expectIdentAst ()
-                    instructions.Add(Jnz (cond, target))
+                    instructions.Add(Jnz (cond, target), line)
                     parseLoop ()
                 | "call" ->
                     expectTokAst DoubleCol
                     let target = expectIdentAst ()
-                    instructions.Add(Call target)
+                    instructions.Add(Call target, line)
                     parseLoop ()
                 | "ret" ->
-                    instructions.Add(Ret)
+                    instructions.Add(Ret, line)
                     parseLoop ()
                 | "halt" ->
                     Lexer.tokenize tl
@@ -470,9 +493,11 @@ module Parser =
                         if not (Array.contains r registers) then
                             printfn "ERROR at line %d: Unknow register '%s'\nList of registers %+A" tl.Line r registers
                             exit 1
-                        instructions.Add(Halt (HaltReg r))
+                        instructions.Add(Halt (HaltReg r), line)
+                        parseLoop ()
                     | Integer n ->
-                        instructions.Add(Halt (HaltImm n))
+                        instructions.Add(Halt (HaltImm n), line)
+                        parseLoop ()
                     | other ->
                         printfn "ERROR at line %d: Expected a register or an integer but got %+A" tl.Line other
                         exit 1
@@ -484,5 +509,98 @@ module Parser =
                 exit 1
 
         parseLoop ()
-        instructions |> Seq.toList
+        instructions |> Seq.toList, labels, labelLines
+
+    let parseToAst (src: string) : ProgramAst =
+        let ast, _, _ = parseToAstInternal src
+        ast
+
+    let private analyzeAst (ast: ProgramAst) (labels: Map<string, int>) (labelLines: Map<string, int>) : Diagnostic list =
+        let diagnostics = System.Collections.Generic.List<Diagnostic>()
+
+        let referenced = System.Collections.Generic.HashSet<string>()
+
+        for instr, line in ast do
+            match instr with
+            | Jz (_, target)
+            | Jnz (_, target)
+            | Call target ->
+                referenced.Add(target) |> ignore
+                if not (labels.ContainsKey target) then
+                    diagnostics.Add({ Kind = "Error"; Line = line; Message = sprintf "Label '%s' is referenced but not defined" target })
+            | _ -> ()
+
+        for KeyValue(name, _) in labels do
+            if not (referenced.Contains name) then
+                let l =
+                    match labelLines.TryFind name with
+                    | Some v -> v
+                    | None -> 1
+                diagnostics.Add({ Kind = "Warning"; Line = l; Message = sprintf "Label '%s' is defined but never referenced" name })
+
+        let mutable defined = Set.empty<string>
+
+        let addUseDiag line reg msg =
+            if not (defined.Contains reg) then
+                diagnostics.Add({ Kind = "Warning"; Line = line; Message = msg })
+
+        let defineReg reg =
+            defined <- defined.Add reg
+
+        for instr, line in ast do
+            match instr with
+            | Mov (dst, Reg src) ->
+                addUseDiag line src (sprintf "Register %s may be used before being set" src)
+                defineReg dst
+            | Mov (dst, Imm _) ->
+                defineReg dst
+            | Dump reg ->
+                addUseDiag line reg (sprintf "Register %s may be used before being set" reg)
+            | Pop reg ->
+                addUseDiag line reg (sprintf "Register %s may be popped before being set" reg)
+                defined <- defined.Remove reg
+            | Add (dst, Reg src) ->
+                addUseDiag line dst (sprintf "Register %s may be used before being set" dst)
+                addUseDiag line src (sprintf "Register %s may be used before being set" src)
+                defineReg dst
+            | Add (dst, Imm _) ->
+                addUseDiag line dst (sprintf "Register %s may be used before being set" dst)
+                defineReg dst
+            | Sub (dst, Reg src) ->
+                addUseDiag line dst (sprintf "Register %s may be used before being set" dst)
+                addUseDiag line src (sprintf "Register %s may be used before being set" src)
+                defineReg dst
+            | Sub (dst, Imm _) ->
+                addUseDiag line dst (sprintf "Register %s may be used before being set" dst)
+                defineReg dst
+            | Cmp (dst, Reg src) ->
+                addUseDiag line dst (sprintf "Register %s may be used before being set" dst)
+                addUseDiag line src (sprintf "Register %s may be used before being set" src)
+                defineReg dst
+            | Cmp (dst, Imm _) ->
+                addUseDiag line dst (sprintf "Register %s may be used before being set" dst)
+                defineReg dst
+            | Jz (Reg reg, _) ->
+                addUseDiag line reg (sprintf "Register %s may be used before being set" reg)
+            | Jz (Imm _, _) -> ()
+            | Jnz (Reg reg, _) ->
+                addUseDiag line reg (sprintf "Register %s may be used before being set" reg)
+            | Jnz (Imm _, _) -> ()
+            | Call _ -> ()
+            | Ret -> ()
+            | Halt (HaltReg reg) ->
+                addUseDiag line reg (sprintf "Register %s may be used before being set" reg)
+            | Halt (HaltImm _) -> ()
+
+        diagnostics |> Seq.toList
+
+    let analyzeSource (src: string) : ProgramInfo =
+        let ast, labels, labelLines = parseToAstInternal src
+        let diagnostics = analyzeAst ast labels labelLines
+        {
+            Ast = ast
+            Labels = labels
+            LabelLines = labelLines
+            Diagnostics = diagnostics
+        }
 

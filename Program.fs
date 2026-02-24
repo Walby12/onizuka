@@ -46,7 +46,9 @@ let main argv =
             
                     match readFile path with
                     | Some res ->
-                        let _ast = Parser.parseToAst res
+                        let info = Parser.analyzeSource res
+                        for d in info.Diagnostics do
+                            printfn "%s at line %d: %s" d.Kind d.Line d.Message
                         let tl = {
                             Src = res
                             Index = 0
@@ -57,6 +59,9 @@ let main argv =
                             ReturnStack = []
                         }
                         collectLabels tl
+                        match tl.Labels.TryFind "main" with
+                        | Some pos -> tl.Index <- pos
+                        | None -> ()
                         parse tl
                         0
                     | None -> 1
