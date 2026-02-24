@@ -520,6 +520,9 @@ module Parser =
 
         let referenced = System.Collections.Generic.HashSet<string>()
 
+        if labels.ContainsKey "main" then
+            referenced.Add("main") |> ignore
+
         for instr, line in ast do
             match instr with
             | Jz (_, target)

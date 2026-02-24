@@ -4,6 +4,7 @@ open Argu
 open Onizuka
 open Onizuka.Lexer
 open Onizuka.Parser
+open Onizuka.Interpreter
 
 type Arguments =
     | [<AltCommandLine("-v")>] Version
@@ -42,29 +43,10 @@ let main argv =
             | Some path ->
                 match readFile path with
                 | Some res ->
-                    let path = results.GetResult File
-            
-                    match readFile path with
-                    | Some res ->
-                        let info = Parser.analyzeSource res
-                        for d in info.Diagnostics do
-                            printfn "%s at line %d: %s" d.Kind d.Line d.Message
-                        let tl = {
-                            Src = res
-                            Index = 0
-                            Line = 1
-                            Token = Ident ("START")
-                            Regs = Array.create registers.Length None
-                            Labels = Map.empty
-                            ReturnStack = []
-                        }
-                        collectLabels tl
-                        match tl.Labels.TryFind "main" with
-                        | Some pos -> tl.Index <- pos
-                        | None -> ()
-                        parse tl
-                        0
-                    | None -> 1
+                    let info = Parser.analyzeSource res
+                    for d in info.Diagnostics do
+                        printfn "%s at line %d: %s" d.Kind d.Line d.Message
+                    Interpreter.run info
                 | None -> 1
             | None ->
                 printfn "Usage: onizuka <file.on> [options]"
